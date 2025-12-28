@@ -1,0 +1,13 @@
+:root{
+  --bg:#0e1117; --panel:#161b22; --text:#e6edf3; --muted:#9da7b3;
+  --border:rgba(255,255,255,.08); --radius:16px; --shadow:0 10px 30px rgba(0,0,0,.35);
+}
+html, body, [class*="css"]{ background:var(--bg); color:var(--text); }
+#MainMenu{visibility:hidden;} footer{visibility:hidden;} header{visibility:hidden;}
+.block-container{ max-width:1200px; padding-top:1.2rem; padding-bottom:2.5rem; }
+.card{ background:var(--panel); border:1px solid var(--border); border-radius:var(--radius);
+  padding:1rem 1.1rem; box-shadow:var(--shadow); }
+.muted{ color:var(--muted); font-size:.95rem; }
+.badge{ display:inline-block; padding:.25rem .6rem; border-radius:999px; border:1px solid var(--border);
+  font-size:.85rem; color:var(--muted); }
+[data-testid="stSidebar"]{ background:#0b0f14; border-right:1px solid var(--border); }
