@@ -11,6 +11,8 @@ from transformers import AutoImageProcessor, ViTForImageClassification
 from streamlit_option_menu import option_menu
 from streamlit_extras.metric_cards import style_metric_cards
 import plotly.graph_objects as go
+from PIL import ImageOps
+
 
 # Config
 st.set_page_config(page_title="Anemia Conjunctiva Screening", page_icon="🩸", layout="wide")
@@ -28,6 +30,7 @@ def load_css(path: str):
             st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 
 load_css("assets/style.css")
+
 
 # Load models (cached)
 @st.cache_resource
@@ -48,69 +51,56 @@ def load_vit():
 
 # Conjunctiva crop pipeline
 def predict_mask(cropper, pil_img: Image.Image) -> np.ndarray:
-    """
-    Returns mask in HxW float [0..1] in cropper input size.
-    """
-    img = pil_img.convert("RGB")
+    img = ImageOps.exif_transpose(pil_img).convert("RGB")
     arr = np.array(img)
-    arr = cv2.resize(arr, CROPPER_INPUT, interpolation=cv2.INTER_AREA)
+    arr = cv2.resize(arr, (256, 256), interpolation=cv2.INTER_AREA)
     arr = arr.astype(np.float32) / 255.0
-    arr = np.expand_dims(arr, axis=0)  # [1,H,W,3]
+    arr = np.expand_dims(arr, axis=0)
 
     pred = cropper.predict(arr, verbose=0)
 
-    # Handle common shapes:
-    # [1,H,W,1] or [1,H,W] -> squeeze to [H,W]
-    pred = np.array(pred)
     if pred.ndim == 4:
         pred = pred[0, :, :, 0]
     elif pred.ndim == 3:
         pred = pred[0, :, :]
     else:
-        raise ValueError(f"Unexpected mask output shape: {pred.shape}")
+        raise ValueError(f"Unexpected mask shape: {pred.shape}")
 
-    pred = np.clip(pred, 0.0, 1.0)
-    return pred
+    return np.clip(pred, 0.0, 1.0)
 
-def crop_from_mask(original_pil: Image.Image, mask_256: np.ndarray, thr=0.5, pad=12) -> Image.Image:
-    """
-    Convert mask bbox (in 256 space) -> crop bbox on original image.
-    If mask empty, fallback to original image center crop.
-    """
-    Hm, Wm = mask_256.shape[:2]
-    binmask = (mask_256 >= thr).astype(np.uint8)
 
-    ys, xs = np.where(binmask > 0)
-    orig_w, orig_h = original_pil.size
 
+def crop_irregular_from_mask(
+    original_pil: Image.Image,
+    mask_256: np.ndarray,
+    thr=0.5,
+    erode_iter=2,
+    dilate_iter=1
+) -> Image.Image:
+
+    original = np.array(original_pil.convert("RGB"))
+    h0, w0 = original.shape[:2]
+
+    mask = (mask_256 >= thr).astype(np.uint8)
+    mask = cv2.resize(mask, (w0, h0), interpolation=cv2.INTER_NEAREST)
+
+    mask = cv2.erode(mask, np.ones((7, 7), np.uint8), iterations=erode_iter)
+    mask = cv2.dilate(mask, np.ones((5, 5), np.uint8), iterations=dilate_iter)
+
+    segmented = np.zeros_like(original)
+    segmented[mask == 1] = original[mask == 1]
+
+    ys, xs = np.where(mask == 1)
     if len(xs) < 10 or len(ys) < 10:
-        # Fallback: center crop square-ish
-        side = min(orig_w, orig_h)
-        cx, cy = orig_w // 2, orig_h // 2
-        x1 = max(0, cx - side // 2)
-        y1 = max(0, cy - side // 2)
-        x2 = min(orig_w, x1 + side)
-        y2 = min(orig_h, y1 + side)
-        return original_pil.crop((x1, y1, x2, y2))
+        return original_pil
 
-    x1m, x2m = xs.min(), xs.max()
-    y1m, y2m = ys.min(), ys.max()
+    x1, x2 = xs.min(), xs.max()
+    y1, y2 = ys.min(), ys.max()
 
-    # padding in mask space
-    x1m = max(0, x1m - pad); y1m = max(0, y1m - pad)
-    x2m = min(Wm - 1, x2m + pad); y2m = min(Hm - 1, y2m + pad)
+    cropped = segmented[y1:y2+1, x1:x2+1]
 
-    # map to original resolution
-    sx = orig_w / float(Wm)
-    sy = orig_h / float(Hm)
+    return Image.fromarray(cropped)
 
-    x1 = int(x1m * sx); x2 = int((x2m + 1) * sx)
-    y1 = int(y1m * sy); y2 = int((y2m + 1) * sy)
-
-    x1 = max(0, x1); y1 = max(0, y1)
-    x2 = min(orig_w, x2); y2 = min(orig_h, y2)
-
-    return original_pil.crop((x1, y1, x2, y2))
 
 # ViT classify
 def classify_anemia(processor, vit_model, pil_img: Image.Image):
@@ -187,7 +177,7 @@ elif selected == "Predict":
             st.info("Upload gambar untuk melihat preview & hasil.")
             st.markdown("</div>", unsafe_allow_html=True)
         else:
-            original = Image.open(uploaded)
+            original = ImageOps.exif_transpose(Image.open(uploaded))
             st.image(original, caption="Original", use_container_width=True)
 
             if run:
@@ -196,7 +186,7 @@ elif selected == "Predict":
                     processor, vit_model = load_vit()
 
                     mask = predict_mask(cropper, original)
-                    roi = crop_from_mask(original, mask, thr=thr, pad=12)
+                    roi = crop_irregular_from_mask(original, mask, thr=thr)
 
                     pred_label, prob_anemic, probs = classify_anemia(processor, vit_model, roi)
 
