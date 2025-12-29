@@ -11,3 +11,19 @@ html, body, [class*="css"]{ background:var(--bg); color:var(--text); }
 .badge{ display:inline-block; padding:.25rem .6rem; border-radius:999px; border:1px solid var(--border);
   font-size:.85rem; color:var(--muted); }
 [data-testid="stSidebar"]{ background:#0b0f14; border-right:1px solid var(--border); }
+
+div[data-testid="stMetric"] * {
+  color: #0e1117 !important;
+}
+
+div[data-testid="stMetric"] {
+  background: #ffffff !important;
+  border-radius: 16px !important;
+}
+
+/* Sometimes label/value are nested deeper */
+div[data-testid="stMetricLabel"] span,
+div[data-testid="stMetricValue"] span,
+div[data-testid="stMetricDelta"] span {
+  color: #0e1117 !important;
+}
